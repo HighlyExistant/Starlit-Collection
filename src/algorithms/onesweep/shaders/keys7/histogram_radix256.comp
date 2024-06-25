@@ -1,0 +1,71 @@
+#version 460
+#extension GL_EXT_shader_atomic_float : require
+#define RADIX                       256
+#define RADIX_MASK                  255
+#define RADIX_START_SECOND          256
+#define RADIX_START_THIRD           512
+#define RADIX_START_FOURTH          768
+#define GLOBAL_HISTOGRAM_DIMENSION  128
+#define GLOBAL_HISTOGRAM_LENGTH     RADIX*2
+//The size of a GlobalHistogram partition tile.
+#define GLOBAL_HISTOGRAM_PART_SIZE  32768   //1<<15
+layout (local_size_x = GLOBAL_HISTOGRAM_DIMENSION, local_size_y = 1, local_size_z = 1) in;
+
+shared uvec4 global_histogram[RADIX*2];
+
+layout(binding = 0) readonly buffer Sort {
+    uint val[];
+} sort;
+layout(binding = 1) writeonly buffer Histogram {
+    uint val[];
+} out_histogram;
+
+layout(push_constant, std430) uniform PushConstant {
+    uint num_keys;
+} pc;
+uint extract_digit(uint key, uint shift) {
+    return key >> shift & RADIX_MASK;
+}
+void histogram_digit_counts() {
+    const uint histogram_offset = gl_LocalInvocationID.x / 64 * RADIX;
+    const uint partition_end = gl_WorkGroupID.x == gl_NumWorkGroups.x - 1 ?
+        pc.num_keys : (gl_WorkGroupID.x + 1) * GLOBAL_HISTOGRAM_PART_SIZE;
+    uint t;
+    for (uint i = gl_LocalInvocationID.x + gl_WorkGroupID.x * GLOBAL_HISTOGRAM_PART_SIZE; 
+    i < partition_end; 
+    i += GLOBAL_HISTOGRAM_DIMENSION) {
+        t = sort.val[i];
+        atomicAdd(global_histogram[extract_digit(t, 0) + histogram_offset].x, 1);
+        atomicAdd(global_histogram[extract_digit(t, 8) + histogram_offset].y, 1);
+        atomicAdd(global_histogram[extract_digit(t, 16) + histogram_offset].z, 1);
+        atomicAdd(global_histogram[extract_digit(t, 24) + histogram_offset].w, 1);
+    }
+
+}
+void reduce_write_digit_counts() {
+    for (uint i = gl_LocalInvocationID.x;
+    i < RADIX; 
+    i += GLOBAL_HISTOGRAM_DIMENSION) {
+        atomicAdd(out_histogram.val[i],                      global_histogram[i].x + global_histogram[i + RADIX].x);
+        atomicAdd(out_histogram.val[i + RADIX_START_SECOND], global_histogram[i].y + global_histogram[i + RADIX].y);
+        atomicAdd(out_histogram.val[i + RADIX_START_THIRD],  global_histogram[i].z + global_histogram[i + RADIX].z);
+        atomicAdd(out_histogram.val[i + RADIX_START_FOURTH], global_histogram[i].w + global_histogram[i + RADIX].w);
+    }
+}
+void main() {
+    if (gl_GlobalInvocationID.x > pc.num_keys) return;
+    // clear the global histogram
+    const uint histogram_end = GLOBAL_HISTOGRAM_LENGTH;
+    
+    for (uint i = gl_LocalInvocationID.x; 
+        i < histogram_end; 
+        i += GLOBAL_HISTOGRAM_DIMENSION) {
+        global_histogram[i] = uvec4(0);
+    }
+    groupMemoryBarrier();
+    barrier();
+    histogram_digit_counts();
+    groupMemoryBarrier();
+    barrier();
+    reduce_write_digit_counts();
+}

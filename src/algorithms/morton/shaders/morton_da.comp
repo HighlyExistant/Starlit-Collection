@@ -1,0 +1,67 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+#pragma use_vulkan_memory_model
+layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+struct AABB {
+    vec4 min_;
+    vec4 max_;
+};
+layout(buffer_reference, std430, buffer_reference_align = 32) buffer AABBWhole {
+    AABB val;
+};
+layout(buffer_reference, std430, buffer_reference_align = 32) buffer AABBSlice {
+    AABB val[];
+};
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer IndexSlice {
+    uint idx[];
+};
+dvec4 centroid_(AABB box) {
+    dvec4 c;
+    c.x = (box.max_.x + box.min_.x) * 0.5;
+    c.y = (box.max_.y + box.min_.y) * 0.5;
+    c.z = (box.max_.z + box.min_.z) * 0.5;
+    return c;
+}
+uint expand_bits(uint v) {
+    v = (v * 0x00010001) & 0xFF0000FF;
+    v = (v * 0x00000101) & 0x0F00F00F;
+    v = (v * 0x00000011) & 0xC30C30C3;
+    v = (v * 0x00000005) & 0x49249249;
+    return v;
+}
+
+// resoulution = 1024.0 default
+uint morton_code(dvec4 xyz, double resolution) {
+    xyz.x = min(max(xyz.x * resolution, 0.0), resolution - 1.0);
+    xyz.y = min(max(xyz.y * resolution, 0.0), resolution - 1.0);
+    xyz.z = min(max(xyz.z * resolution, 0.0), resolution - 1.0);
+    uint xx = expand_bits(uint(xyz.x));
+    uint yy = expand_bits(uint(xyz.y));
+    uint zz = expand_bits(uint(xyz.z));
+    return xx * 4 + yy * 2 + zz;
+}
+
+uint morton(AABB box, AABB whole) {
+        dvec4 p = centroid_(box);
+        p.x -= double(whole.min_.x);
+        p.y -= double(whole.min_.y);
+        p.z -= double(whole.min_.z);
+        p.x /= double(whole.max_.x - whole.min_.x);
+        p.y /= double(whole.max_.y - whole.min_.y);
+        p.z /= double(whole.max_.z - whole.min_.z);
+        return morton_code(p, 1024.0);
+}
+layout(push_constant, std430) uniform PushConstants {
+    AABBWhole whole; // 32
+    // count of all aabb's
+    AABBSlice bbox; // 64
+    IndexSlice bbox_indices; // 64
+    IndexSlice indices; // 72
+    uint total; // 36
+} pc;
+void main() {
+    if (gl_GlobalInvocationID.x < pc.total) {
+        pc.indices.idx[gl_GlobalInvocationID.x] = morton(pc.bbox.val[pc.bbox_indices.idx[gl_GlobalInvocationID.x]], pc.whole.val);
+    }
+}

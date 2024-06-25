@@ -1,0 +1,101 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot: enable
+#extension GL_KHR_shader_subgroup_basic: enable
+#extension GL_ARB_shader_ballot: enable
+#define RADIX                       256
+#define HALF_RADIX                  128
+#define RADIX_LOG                   8
+#define RADIX_MASK                  255
+#define RADIX_START_SECOND          256
+#define RADIX_START_THIRD           512
+#define RADIX_START_FOURTH          768
+#define PART_SIZE                   7680
+#define D_TOTAL_SMEM                7936
+#define FLAG_REDUCTION              1
+#define FLAG_INCLUSIVE              2
+#define FLAG_MASK                   3       //Mask used to retrieve flag values
+#define KEYS_PER_THREAD             15
+#define D_DIM                       512
+#define US_DIM                      128 
+#define SCAN_DIM                    128 
+layout (local_size_x = SCAN_DIM, local_size_y = 1, local_size_z = 1) in;
+shared uint g_scan[SCAN_DIM];
+layout(push_constant, std430) uniform PushConstant {
+    uint num_keys;
+    uint threadblocks;
+    uint radix_shift;
+} pc;
+layout(binding = 0) buffer GlobalHistogram {
+    uint val[];
+} global_histogram;
+layout(binding = 1) buffer HistogramPass {
+    uint val[];
+} histpass;
+layout(binding = 2) buffer HistogramSort {
+    uint val[];
+} sort;
+void exclusive_threablock_scan_full_wge16(uint lane_mask, uint circular_lane_shift, uint partition_end, uint device_offset, inout uint reduction) {
+    for (uint i = gl_LocalInvocationID.x; i < partition_end; i += SCAN_DIM)
+    {
+        g_scan[gl_LocalInvocationID.x] = histpass.val[i + device_offset];
+        g_scan[gl_LocalInvocationID.x] += subgroupExclusiveAdd(g_scan[gl_LocalInvocationID.x]);
+        groupMemoryBarrier();
+        barrier();
+            
+        if (gl_LocalInvocationID.x < SCAN_DIM / gl_SubgroupSize)
+        {
+            g_scan[(gl_LocalInvocationID.x + 1) * gl_SubgroupSize - 1] +=
+                subgroupExclusiveAdd(g_scan[(gl_LocalInvocationID.x + 1) * gl_SubgroupSize - 1]);
+        }
+        groupMemoryBarrier();
+        barrier();
+            
+        histpass.val[circular_lane_shift + (i & ~lane_mask) + device_offset] =
+            (gl_SubgroupInvocationID.x != lane_mask ? g_scan[gl_LocalInvocationID.x.x] : 0) +
+            (gl_LocalInvocationID.x.x >= gl_SubgroupSize ?
+            readInvocationARB(g_scan[gl_LocalInvocationID.x.x - 1], 0) : 0) +
+            reduction;
+
+        reduction += g_scan[SCAN_DIM - 1];
+        groupMemoryBarrier();
+        barrier();
+    }
+}
+void exclusive_threablock_scan_partial_wge16(uint lane_mask, uint circular_lane_shift, uint partition_end, uint device_offset, inout uint reduction) {
+    uint i = gl_LocalInvocationID.x + partition_end;
+    if (i < pc.threadblocks) {
+        g_scan[gl_LocalInvocationID.x] = histpass.val[device_offset+i];
+    }
+    g_scan[gl_LocalInvocationID.x] += subgroupExclusiveAdd(g_scan[gl_LocalInvocationID.x]);
+    groupMemoryBarrier();
+    barrier();
+
+    if (gl_LocalInvocationID.x < SCAN_DIM/gl_SubgroupSize) {
+        g_scan[(gl_LocalInvocationID.x+1)*gl_SubgroupSize-1] +=
+            subgroupExclusiveAdd(g_scan[gl_LocalInvocationID.x+1]*gl_SubgroupSize-1);
+    }
+    groupMemoryBarrier();
+    barrier();
+    uint index = circular_lane_shift + (i&~lane_mask);
+    if (index < pc.threadblocks) {
+        histpass.val[index+device_offset] =
+            (gl_SubgroupInvocationID.x != lane_mask ? g_scan[gl_LocalInvocationID.x] : 0) +
+            (gl_LocalInvocationID.x >= gl_SubgroupSize ?
+            g_scan[(gl_LocalInvocationID.x & ~lane_mask) - 1] : 0) +
+            reduction;
+    }
+}
+void exclusive_threadblock_scan_wge16() {
+    uint reduction = 0;
+    uint lane_mask = gl_SubgroupSize-1;
+    uint circular_lane_shift = gl_SubgroupInvocationID.x + 1 & lane_mask;
+    uint partitions_end = pc.threadblocks/SCAN_DIM*SCAN_DIM;
+    uint device_offset = gl_WorkGroupID.x * pc.threadblocks;
+    exclusive_threablock_scan_full_wge16(lane_mask, circular_lane_shift, partitions_end, device_offset, reduction);
+    exclusive_threablock_scan_partial_wge16(lane_mask, circular_lane_shift, partitions_end, device_offset, reduction);
+}
+void main() {
+    exclusive_threadblock_scan_wge16();
+}

@@ -1,0 +1,13 @@
+#version 450
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+layout(push_constant, std430) uniform PushConstant {
+    uint start;
+    uint size;
+} pc;
+layout(binding = 0) writeonly buffer WriteBuffer {
+    uint val[];
+} write;
+void main() {
+    if (gl_GlobalInvocationID.x > pc.size) return;
+    write.val[gl_GlobalInvocationID.x] = gl_GlobalInvocationID.x+pc.start;
+}

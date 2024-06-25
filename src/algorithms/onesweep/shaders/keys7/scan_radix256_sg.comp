@@ -1,0 +1,61 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot: enable
+#extension GL_KHR_shader_subgroup_basic: enable
+#extension GL_ARB_shader_ballot: enable
+#define RADIX                       256
+#define RADIX_MASK                  255
+#define RADIX_START_SECOND          256
+#define RADIX_START_THIRD           512
+#define RADIX_START_FOURTH          768
+#define GLOBAL_HISTOGRAM_DIMENSION  128
+#define GLOBAL_HISTOGRAM_LENGTH     RADIX*2
+//The size of a GlobalHistogram partition tile.
+#define GLOBAL_HISTOGRAM_PART_SIZE  32768   //1<<15
+#define FLAG_INCLUSIVE  2
+layout (local_size_x = RADIX, local_size_y = 1, local_size_z = 1) in;
+// input global histogram should be split based on the size of the radix and the amount
+// of passes. current RADIX = 256, on 32 bit values for 4 passes. The total size of this
+// buffer should be RADIX*RADIX_PASSES
+layout(binding = 0) readonly buffer GlobalHistogram {
+    uint val[];
+} global_histogram;
+layout(binding = 1) buffer HistogramPass {
+    uint val[];
+} histogram_pass;
+layout(push_constant, std430) uniform PushConstant {
+    uint thread_blocks;
+} pc;
+shared uint g_scan[RADIX];
+
+void load_inclusive_scan() {
+    uint t = global_histogram.val[gl_LocalInvocationID.x + gl_WorkGroupID.x * RADIX];
+    g_scan[gl_LocalInvocationID.x] = t + subgroupExclusiveAdd(t);
+}
+void global_histogram_exclusive_scan_wge16() {
+    groupMemoryBarrier();
+    barrier();
+    if (gl_LocalInvocationID.x < (RADIX/gl_SubgroupSize)) {
+        g_scan[(gl_LocalInvocationID.x + 1)*gl_SubgroupSize-1] +=
+            subgroupExclusiveAdd(g_scan[(gl_LocalInvocationID.x + 1)*gl_SubgroupSize-1]);
+    }
+    groupMemoryBarrier();
+    barrier();
+    uint lane_mask = gl_SubgroupSize-1;
+    // the index will start at gl_SubgroupInvocationID.x+1, and every gl_SubgroupSize iterations,
+    // it will look back to the (gl_SubgroupInvocationID.x-gl_SubgroupSize) entry.
+    uint index = (gl_SubgroupInvocationID.x+1&lane_mask) + (gl_LocalInvocationID.x& ~lane_mask);
+    histogram_pass.val[index + gl_WorkGroupID.x * RADIX * pc.thread_blocks] =
+    //histogram_pass.val[index + gl_WorkGroupID.x * RADIX * gl_NumWorkGroups.x] =
+        (
+            (gl_SubgroupInvocationID.x != lane_mask ? g_scan[gl_LocalInvocationID.x] : 0) +
+            (gl_LocalInvocationID.x >= gl_SubgroupSize ? readInvocationARB(g_scan[gl_LocalInvocationID.x - 1], 0) : 0)
+        ) << 2 | FLAG_INCLUSIVE;
+}
+void main() {
+    load_inclusive_scan();
+    if (gl_SubgroupSize  >= 16) {
+        global_histogram_exclusive_scan_wge16();
+    }
+}

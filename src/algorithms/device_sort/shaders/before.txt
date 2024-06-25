@@ -1,0 +1,21 @@
+for (uint i = gl_WorkGroupID.x; i < partition_end; i += SCAN_DIM) {
+        g_scan[gl_LocalInvocationID.x] = histpass.val[i + device_offset];
+        g_scan[gl_LocalInvocationID.x] += subgroupExclusiveAdd(g_scan[gl_LocalInvocationID.x]);
+        groupMemoryBarrier();
+        barrier();
+        if (gl_LocalInvocationID.x < SCAN_DIM / gl_SubgroupSize) {
+            g_scan[(gl_LocalInvocationID.x + 1)*gl_SubgroupSize-1] +=
+            subgroupExclusiveAdd(g_scan[(gl_LocalInvocationID.x + 1)*gl_SubgroupSize-1]);
+        }
+        groupMemoryBarrier();
+        barrier();
+        histpass.val[circular_lane_shift+(i&~lane_mask)+lane_mask] =
+            (gl_SubgroupInvocationID.x != lane_mask ? g_scan[gl_LocalInvocationID.x] : 0) +
+            (gl_LocalInvocationID.x >= gl_SubgroupSize ?
+            readInvocationARB(g_scan[gl_LocalInvocationID.x-1],0) : 0) +
+            reduction;
+            
+        reduction += g_scan[SCAN_DIM - 1];
+        groupMemoryBarrier();
+        barrier();
+    }

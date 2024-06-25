@@ -1,0 +1,104 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot: enable
+#extension GL_KHR_shader_subgroup_basic: enable
+#extension GL_ARB_shader_ballot: enable
+#define RADIX                       256
+#define HALF_RADIX                  128
+#define RADIX_LOG                   8
+#define RADIX_MASK                  255
+#define RADIX_START_SECOND          256
+#define RADIX_START_THIRD           512
+#define RADIX_START_FOURTH          768
+#define PART_SIZE                   7680
+#define D_TOTAL_SMEM                7936
+#define FLAG_REDUCTION              1
+#define FLAG_INCLUSIVE              2
+#define FLAG_MASK                   3       //Mask used to retrieve flag values
+#define KEYS_PER_THREAD             15
+#define D_DIM                       512
+#define US_DIM                      128 
+
+shared uint g_us[RADIX*2];
+
+layout(binding = 0) buffer GlobalHistogram {
+    uint val[];
+} global_histogram;
+layout(binding = 1) buffer HistogramPass {
+    uint val[];
+} histpass;
+layout(binding = 2) buffer HistogramSort {
+    uint val[];
+} sort;
+layout(push_constant, std430) uniform PushConstant {
+    uint num_keys;
+    uint threadblocks;
+    uint radix_shift;
+} pc;
+uint global_histogram_offset() {
+    return pc.radix_shift<<5;
+}
+uint extract_digit(uint key)
+{
+    return key >> pc.radix_shift & RADIX_MASK;
+}
+void histogram_digit_counts() {
+    uint histogram_offset = gl_LocalInvocationID.x / 64 * RADIX;
+    uint partition_end = gl_WorkGroupID.x == pc.threadblocks - 1 ?
+        pc.num_keys : (gl_WorkGroupID.x +1) * PART_SIZE;
+
+    for (uint i = gl_LocalInvocationID.x + gl_WorkGroupID.x * PART_SIZE; i < partition_end; i += US_DIM) {
+        atomicAdd(g_us[extract_digit(sort.val[i]) + histogram_offset], 1);
+    }
+}
+void reduce_write_digit_counts() {
+    for (uint i = gl_LocalInvocationID.x; i < RADIX; i += US_DIM) {
+        g_us[i] += g_us[i+RADIX];
+        histpass.val[i*pc.threadblocks+gl_WorkGroupID.x] = g_us[i];
+        g_us[i] += subgroupExclusiveAdd(g_us[i]);
+    }
+}
+void global_hist_exclusive_scan() {
+    groupMemoryBarrier();
+    barrier();
+        
+    if (gl_LocalInvocationID.x < (RADIX / gl_SubgroupSize))
+    {
+        g_us[(gl_LocalInvocationID.x + 1) * gl_SubgroupSize - 1] +=
+            subgroupExclusiveAdd(g_us[(gl_LocalInvocationID.x + 1) * gl_SubgroupSize - 1]);
+    }
+    groupMemoryBarrier();
+    barrier();
+        
+    //atomically add to global histogram
+    const uint globalHistOffset = global_histogram_offset();
+    const uint lane_mask = gl_SubgroupSize - 1;
+    const uint circular_lane_shift = gl_SubgroupInvocationID.x + 1 & lane_mask;
+    for (uint i = gl_LocalInvocationID.x; i < RADIX; i += US_DIM)
+    {
+        const uint index = circular_lane_shift + (i & ~lane_mask);
+        atomicAdd(global_histogram.val[index + globalHistOffset],
+            (gl_SubgroupInvocationID.x != lane_mask ? g_us[i] : 0) +
+            (i >= gl_SubgroupSize ? readInvocationARB(g_us[i - 1], 0) : 0));
+    }
+}
+layout (local_size_x = US_DIM, local_size_y = 1, local_size_z = 1) in;
+void main() {
+    //clear shared memory
+    uint histogram_end = RADIX*2;
+    for (uint i = gl_LocalInvocationID.x; i < histogram_end; i += US_DIM) {
+        g_us[i] = 0;
+    }
+    groupMemoryBarrier();
+    barrier();
+
+    histogram_digit_counts();
+    
+    groupMemoryBarrier();
+    barrier();
+
+    reduce_write_digit_counts();
+
+    global_hist_exclusive_scan();
+}

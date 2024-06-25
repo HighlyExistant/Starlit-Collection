@@ -1,0 +1,40 @@
+#version 450
+// #extension GL_EXT_shader_atomic_float : require
+// #extension GL_KHR_shader_subgroup_arithmetic : enable
+// #extension GL_KHR_shader_subgroup_ballot: enable
+// #extension GL_KHR_shader_subgroup_basic: enable
+// #extension GL_ARB_shader_ballot: enable
+
+// layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+// shared uint broadcast;
+// shared bool lock;
+// shared uint fallback_reduction[256 / 4];
+// layout(binding = 0) coherent buffer Index {
+//     uint val[];
+// } idx;
+// void aquire_partition_index() {
+//     if (gl_LocalInvocationID.x == 0u) {
+//         broadcast = atomicAdd(idx.val[0], 1);
+//     }
+// }
+// void set_lock() {
+//     if (gl_LocalInvocationID.x == 0u) {
+//         lock = true;
+//     }
+// }
+// layout(push_constant, std430) uniform PushConstant {
+//     uint thread_blocks;
+// } pc;
+// void main() {
+//     aquire_partition_index();
+//     set_lock();
+//     barrier();
+//     groupMemoryBarrier();
+//     const uint partition_index = broadcast;
+//     if (partition_index < pc.thread_blocks-1) {
+
+//     }
+// }
+void main() {
+    
+}
