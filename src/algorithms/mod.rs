@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::{Arc}};
+use std::sync::Arc;
 
 use ash::vk;
 use nightfall_core::{barriers::Barriers, buffers::{BufferCreateFlags, BufferCreateInfo, BufferOffset, BufferUsageFlags, MemoryPropertyFlags}, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorPool, DescriptorSetAllocation}, device::LogicalDevice, memory::DevicePointer, queue::Queue};
