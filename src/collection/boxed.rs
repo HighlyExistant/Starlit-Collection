@@ -53,3 +53,9 @@ impl<T: ?Sized, A: GeneralAllocator + ?Sized> std::ops::DerefMut for SlBox<T, A>
         unsafe { self.1.as_mut() }
     }
 }
+
+impl<T: ?Sized, A: GeneralAllocator + ?Sized> Drop for SlBox<T, A> {
+    fn drop(&mut self) {
+        self.2.deallocate(self.0, Layout::from_size_align(self.0.size(), 8).unwrap()).unwrap();
+    }
+}

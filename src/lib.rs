@@ -12,7 +12,7 @@ mod tests {
     use alloc::{FreeListAllocator, HostDeviceConversions};
     use ash::vk;
     use nightfall_core::{buffers::{BufferUsageFlags, MemoryPropertyFlags}, commands::{CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags}, descriptors::{DescriptorPoolBuilder, DescriptorType}, device::{LogicalDevice, LogicalDeviceBuilder}, instance::{Instance, InstanceBuilder}, queue::{DeviceQueueCreateFlags, Queue, QueueFlags, Submission}, Version};
-    use starlit_alloc::{GeneralAllocator, GpuProgramState, GpuAllocators};
+    use starlit_alloc::{GeneralAllocator, GpuAllocators, StandardAllocator};
 
     use super::*;
     fn barebones() -> (Arc<LogicalDevice>, impl ExactSizeIterator<Item = Arc<Queue>>) {
@@ -36,7 +36,7 @@ mod tests {
     fn barebones_vec_test() {
         let (device, mut queues) = barebones();
         let queue = queues.next().unwrap();
-        let gpu_state = GpuAllocators::new(queue.clone()).unwrap();
+        let gpu_state = StandardAllocator::new(queue.clone()).unwrap();
         let host_freelist = gpu_state.freelist(BufferUsageFlags::STORAGE_BUFFER, MemoryPropertyFlags::HOST_VISIBLE|MemoryPropertyFlags::HOST_COHERENT).unwrap();
         let device_freelist = gpu_state.freelist(BufferUsageFlags::STORAGE_BUFFER, MemoryPropertyFlags::DEVICE_LOCAL).unwrap();
         let mut hostvec = VkVec::<i32, dyn GeneralAllocator>::new(host_freelist.clone());
@@ -68,7 +68,7 @@ mod tests {
             .device_group()
             .build(physical_device.clone()).unwrap();
         let queue = queues.next().unwrap();
-        let gpu_state = GpuAllocators::new(queue.clone()).unwrap();
+        let gpu_state = StandardAllocator::new(queue.clone()).unwrap();
         let host_freelist = gpu_state.freelist(BufferUsageFlags::STORAGE_BUFFER, MemoryPropertyFlags::HOST_VISIBLE|MemoryPropertyFlags::HOST_COHERENT).unwrap();
         let device_freelist = gpu_state.freelist(BufferUsageFlags::STORAGE_BUFFER|BufferUsageFlags::SHADER_DEVICE_ADDRESS, MemoryPropertyFlags::DEVICE_LOCAL).unwrap();
         let devvec = VkVec::<i32, dyn GeneralAllocator>::with_capacity(50, device_freelist.clone()).unwrap();
