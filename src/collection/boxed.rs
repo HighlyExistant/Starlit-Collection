@@ -1,7 +1,7 @@
 use std::{alloc::Layout, marker::PhantomData, os::raw::c_void, ptr::NonNull, sync::Arc};
 
-use nightfall_core::{memory::DevicePointer, NfPtr};
-use starlit_alloc::GeneralAllocator;
+use nightfall_core::{memory::DevicePointer, AsNfptr, NfPtr};
+use starlit_alloc::{GeneralAllocator, HostDeviceConversions};
 pub struct SlBox<T: ?Sized, A: GeneralAllocator + ?Sized>(NfPtr, NonNull<T>, Arc<A>);
 
 impl<T, A: GeneralAllocator + ?Sized> SlBox<T, A> {
@@ -41,6 +41,10 @@ impl<T, A: GeneralAllocator + ?Sized> SlBox<T, A> {
     pub fn as_device_ptr(&self) -> Option<DevicePointer> {
         self.2.as_device_ptr(self.0)
     }
+    #[inline]
+    pub fn get_allocator(&self) -> Arc<A> {
+        self.2.clone()
+    }
 }
 impl<T: ?Sized, A: GeneralAllocator + ?Sized> std::ops::Deref for SlBox<T, A>  {
     type Target = T;
@@ -57,5 +61,10 @@ impl<T: ?Sized, A: GeneralAllocator + ?Sized> std::ops::DerefMut for SlBox<T, A>
 impl<T: ?Sized, A: GeneralAllocator + ?Sized> Drop for SlBox<T, A> {
     fn drop(&mut self) {
         self.2.deallocate(self.0, Layout::from_size_align(self.0.size(), 8).unwrap()).unwrap();
+    }
+}
+unsafe impl<T, A: GeneralAllocator + ?Sized> AsNfptr for SlBox<T, A> {
+    unsafe fn as_nfptr(&self) -> NfPtr {
+        self.0
     }
 }

@@ -1,0 +1,28 @@
+#version 460
+// #extension GL_EXT_buffer_reference : require
+// #extension GL_EXT_buffer_reference_uvec2 : require
+
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0) readonly buffer Indices {
+    uint val[];
+} idx;
+layout(binding = 1) readonly buffer PayloadSrc {
+    uint val[];
+} src;
+layout(binding = 2) writeonly buffer PayloadDst {
+    uint val[];
+} dst;
+layout(push_constant, std430) uniform PushConstants {
+    // count of all indices
+    uint count;
+    uint size;
+} pc;
+void main() {
+    if (gl_GlobalInvocationID.x < pc.count) {
+        for (uint i = 0; i < pc.size; i++) {
+            uint scatter_idx = idx.val[(gl_GlobalInvocationID.x)]*pc.size;
+            dst.val[(gl_GlobalInvocationID.x*pc.size)+i] = src.val[scatter_idx+i];
+        }
+    }
+}

@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Arc};
 
 use nightfall_core::{commands::CommandPoolAllocation, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DependencyFlags}, NfPtr};
 
-use crate::{algorithms::onesweep::digit_binning_pass::Radix256DigitBinningPassPushConstant, alloc::{FreeListAllocator, GeneralAllocator}, error::StarlitError, VkVec};
+use crate::{algorithms::onesweep::digit_binning_pass::Radix256DigitBinningPassPushConstant, alloc::{FreeListAllocator, GeneralAllocator}, error::StarlitError, SlVec};
 
 use self::{digit_binning_pass::{Radix256DigitBinningPass, Radix256DigitBinningPassInput}, histogram::{Radix256Histogram, Radix256HistogramInput}, reset::{Radix256Reset, Radix256ResetInput}, scan::{Radix256Scan, Radix256ScanInput}, tuning::TuningParameters};
 
@@ -22,13 +22,13 @@ pub struct OneSweepState<A: GeneralAllocator> {
     // histogram_input: <Radix256Histogram as StarlitShaderKernel>::Input,
     // scan_input: <Radix256Scan as StarlitShaderKernel>::Input,
     // digit_pass_input: <Radix256DigitBinningPass as StarlitShaderKernel>::Input,
-    histogram: VkVec<u32, A>,
-    pub histogram_pass: VkVec<u32, A>,
-    pub sort_alt_buffer: VkVec<u32, A>,
-    global_partition_tiles: VkVec<u32, A>,
+    histogram: SlVec<u32, A>,
+    pub histogram_pass: SlVec<u32, A>,
+    pub sort_alt_buffer: SlVec<u32, A>,
+    global_partition_tiles: SlVec<u32, A>,
     /// used when theres not enough shared memory for an operation
-    global_shared_memory: VkVec<u32, A>,
-    pub debug: Option<VkVec<u32, A>>,
+    global_shared_memory: SlVec<u32, A>,
+    pub debug: Option<SlVec<u32, A>>,
     sort_buffer: NfPtr,
     num_keys: usize,
     thread_blocks: usize,
@@ -51,12 +51,12 @@ pub struct OneSweepU32<A: GeneralAllocator> {
 impl<A: GeneralAllocator> OneSweepU32<A> {
     const PART_SIZE: usize = 7680; // 3840
     fn initialize_static_buffers(freelist: Arc<A>, input: &mut OneSweepState<A>, thread_blocks: usize) {
-        input.histogram = VkVec::<u32, A>::new_zeroed(1024, freelist.clone()).unwrap();
-        input.global_partition_tiles = VkVec::<u32, A>::new_zeroed(4 as usize, freelist.clone()).unwrap();
+        input.histogram = SlVec::<u32, A>::new_zeroed(1024, freelist.clone()).unwrap();
+        input.global_partition_tiles = SlVec::<u32, A>::new_zeroed(4 as usize, freelist.clone()).unwrap();
     }
     fn initialize_buffers(freelist: Arc<A>, input: &mut OneSweepState<A>, thread_blocks: usize, num_keys: usize) {
-        input.sort_alt_buffer = VkVec::<u32, A>::new_zeroed(num_keys, freelist.clone()).unwrap();
-        input.histogram_pass = VkVec::<u32, A>::new_zeroed(1024*thread_blocks, freelist.clone()).unwrap();
+        input.sort_alt_buffer = SlVec::<u32, A>::new_zeroed(num_keys, freelist.clone()).unwrap();
+        input.histogram_pass = SlVec::<u32, A>::new_zeroed(1024*thread_blocks, freelist.clone()).unwrap();
     }
 }
 
@@ -102,10 +102,10 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             prev_input.global_histogram_partitions = input.num_keys.div_ceil(32768); // 32768
             if prev_input.num_keys < input.num_keys {
-                prev_input.sort_alt_buffer = VkVec::<u32, A>::new_zeroed(input.num_keys, self.freelist.clone()).unwrap();
+                prev_input.sort_alt_buffer = SlVec::<u32, A>::new_zeroed(input.num_keys, self.freelist.clone()).unwrap();
             }
             if prev_input.thread_blocks < thread_blocks as usize {
-                prev_input.histogram_pass = VkVec::<u32, A>::new_zeroed(1024*thread_blocks as usize, self.freelist.clone()).unwrap();
+                prev_input.histogram_pass = SlVec::<u32, A>::new_zeroed(1024*thread_blocks as usize, self.freelist.clone()).unwrap();
             }
             prev_input.num_keys = input.num_keys;
             prev_input.thread_blocks = thread_blocks as usize;
@@ -113,13 +113,13 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
         } else { // if the cache has not been used it's the first time and all must be allocated
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             let global_histogram_partitions = input.num_keys.div_ceil(32768);
-            let debug = VkVec::new_zeroed(1024 as usize, self.freelist.clone()).unwrap();
+            let debug = SlVec::new_zeroed(1024 as usize, self.freelist.clone()).unwrap();
             let mut state = OneSweepState {
-                histogram: VkVec::new(self.freelist.clone()),
-                sort_alt_buffer: VkVec::new(self.freelist.clone()),
-                histogram_pass: VkVec::new(self.freelist.clone()),
-                global_partition_tiles: VkVec::new(self.freelist.clone()),
-                global_shared_memory: VkVec::new(self.freelist.clone()),
+                histogram: SlVec::new(self.freelist.clone()),
+                sort_alt_buffer: SlVec::new(self.freelist.clone()),
+                histogram_pass: SlVec::new(self.freelist.clone()),
+                global_partition_tiles: SlVec::new(self.freelist.clone()),
+                global_shared_memory: SlVec::new(self.freelist.clone()),
                 num_keys: input.num_keys,
                 thread_blocks: thread_blocks as usize,
                 sort_buffer: input.sort,

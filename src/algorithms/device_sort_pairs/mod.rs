@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use ash::vk;
-use nightfall_core::{barriers::Barriers, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorLayoutBuilder, DescriptorSetAllocation, DescriptorSetLayoutCreateFlags, DescriptorType, DescriptorWriter}, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DependencyFlags}, pipeline::{compute::ComputePipeline, layout::{self, PipelineLayout, PipelineLayoutBuilder}, shader::{ShaderCreateInfo, ShaderStageFlags}}, NfPtr};
+use nightfall_core::{barriers::Barriers, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorLayoutBuilder, DescriptorSetAllocation, DescriptorSetLayoutCreateFlags, DescriptorType, DescriptorWriter}, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DependencyFlags}, pipeline::{compute::ComputePipeline, shader::Shader, layout::{self, PipelineLayout, PipelineLayoutBuilder}, shader::{ShaderCreateInfo, ShaderStageFlags}}, NfPtr};
 use starlit_alloc::GeneralAllocator;
 
-use crate::{error::StarlitError, VkVec};
+use crate::{error::StarlitError, SlVec};
 
 use super::{onesweep::tuning::TuningParameters, StarlitShaderAlgorithm, StarlitShaderExecute, StarlitStrategyInternal, Strategy};
 
@@ -18,12 +18,12 @@ use super::{onesweep::tuning::TuningParameters, StarlitShaderAlgorithm, StarlitS
 // uint num_keys
 
 pub struct DeviceRadixSortPairsState<A: GeneralAllocator + ?Sized> {
-    pub global_histogram: VkVec<u32, A>,
+    pub global_histogram: SlVec<u32, A>,
     pub sort: NfPtr,
     pub payload: NfPtr,
-    pub alt: VkVec<u32, A>,
-    pub alt_payload: VkVec<u32, A>,
-    pub pass: VkVec<u32, A>,
+    pub alt: SlVec<u32, A>,
+    pub alt_payload: SlVec<u32, A>,
+    pub pass: SlVec<u32, A>,
     pub num_keys: usize,
     pub thread_blocks: usize,
 }
@@ -56,14 +56,14 @@ pub struct DeviceRadixSortPairs<A: GeneralAllocator + ?Sized> {
 impl<A: GeneralAllocator + ?Sized> DeviceRadixSortPairs<A> {
     const PART_SIZE: usize = 7680; // 3840
     fn initialize_static_buffers(freelist: Arc<A>, input: &mut DeviceRadixSortPairsState<A>, thread_blocks: usize) -> Result<(), StarlitError> {
-        input.global_histogram = VkVec::<u32, A>::new_zeroed(1024, freelist.clone())?;
+        input.global_histogram = SlVec::<u32, A>::new_zeroed(1024, freelist.clone())?;
         Ok(())
         // input.global_partition_tiles = VkVec::<u32, A>::new_zeroed(4 as usize, freelist.clone()).unwrap();
     }
     fn initialize_buffers(freelist: Arc<A>, input: &mut DeviceRadixSortPairsState<A>, thread_blocks: usize, num_keys: usize) -> Result<(), StarlitError> {
-        input.alt = VkVec::<u32, A>::new_zeroed(num_keys, freelist.clone())?;
-        input.alt_payload = VkVec::<u32, A>::new_zeroed(num_keys, freelist.clone())?;
-        input.pass = VkVec::<u32, A>::new_zeroed(thread_blocks*256, freelist.clone())?;
+        input.alt = SlVec::<u32, A>::new_zeroed(num_keys, freelist.clone())?;
+        input.alt_payload = SlVec::<u32, A>::new_zeroed(num_keys, freelist.clone())?;
+        input.pass = SlVec::<u32, A>::new_zeroed(thread_blocks*256, freelist.clone())?;
         Ok(())
     }
     fn radix_pass(&self, command_buffer: &CommandPoolAllocation, radix_shift: u32, input: &DeviceRadixSortPairsState<A>) {
@@ -203,10 +203,10 @@ impl<A: GeneralAllocator + ?Sized> StarlitShaderAlgorithm<A> for DeviceRadixSort
         if let Some(prev_input) = &mut self.input {
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             if prev_input.num_keys < input.num_keys {
-                prev_input.alt = VkVec::<u32, A>::new_zeroed(input.num_keys, self.freelist.clone())?;
+                prev_input.alt = SlVec::<u32, A>::new_zeroed(input.num_keys, self.freelist.clone())?;
             }
             if prev_input.thread_blocks < thread_blocks as usize {
-                prev_input.pass = VkVec::<u32, A>::new_zeroed(256*thread_blocks as usize, self.freelist.clone())?;
+                prev_input.pass = SlVec::<u32, A>::new_zeroed(256*thread_blocks as usize, self.freelist.clone())?;
             }
             prev_input.num_keys = input.num_keys;
             prev_input.thread_blocks = thread_blocks as usize;
@@ -214,10 +214,10 @@ impl<A: GeneralAllocator + ?Sized> StarlitShaderAlgorithm<A> for DeviceRadixSort
         } else {
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             let mut state = DeviceRadixSortPairsState {
-                global_histogram: VkVec::new(self.freelist.clone()),
-                alt: VkVec::new(self.freelist.clone()),
-                alt_payload: VkVec::new(self.freelist.clone()),
-                pass: VkVec::new(self.freelist.clone()),
+                global_histogram: SlVec::new(self.freelist.clone()),
+                alt: SlVec::new(self.freelist.clone()),
+                alt_payload: SlVec::new(self.freelist.clone()),
+                pass: SlVec::new(self.freelist.clone()),
                 num_keys: input.num_keys,
                 thread_blocks: thread_blocks as usize,
                 sort: input.sort,

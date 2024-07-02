@@ -16,9 +16,10 @@ pub mod device_sort;
 pub mod device_sort_pairs;
 /// simple module for filling in iterator with a range.
 pub mod range;
+/// module for standard memory operations such as zeroing out device memory.
+pub mod memory;
 /// TODO simple module for doing a Chained Scan Decoupled Lookback Fallback Exclusive **NOT IMPLEMENTED**
 mod csdlfe;
-
 
 #[derive(Clone)]
 pub enum Strategy {
@@ -82,7 +83,7 @@ pub trait StarlitShaderKernel: Sized {
 }
 /// Extension to [`StarlitShaderKernel`] so that it can support creation using previously allocated descriptor sets from another descriptor layout.
 pub trait StarlitShaderKernelFromDescriptorSets: StarlitShaderKernel {
-    fn from_descriptor_sets(device: Arc<LogicalDevice>, sets: &[DescriptorSetAllocation]) -> Result<Self, StarlitError>;
+    fn from_descriptor_pool(device: Arc<LogicalDevice>, pool: Arc<DescriptorPool>, layout: Arc<DescriptorLayout>) -> Result<Self, StarlitError>;
 }
 /// Extension to [`StarlitShaderKernel`] so that it can support registering only the constants.
 pub trait StarlitShaderKernelConstants: StarlitShaderKernel {
@@ -105,4 +106,8 @@ pub trait StarlitShaderExecute {
         self.execute(command_buffer, input)?;
         Ok(None)
     }
+}
+
+pub trait StarlitShaderLibrary {
+    
 }
