@@ -7,7 +7,7 @@ use crate::{algorithms::{StarlitShaderKernel, StarlitStrategy, StarlitStrategyIn
 pub struct Radix256ScanInputPC {
     pub thread_blocks: u32,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Radix256ScanInput {
     pub thread_blocks: u32,
     pub global_histogram_in: NfPtr,
@@ -87,7 +87,7 @@ impl StarlitShaderKernel for Radix256Scan {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: vk::CommandBuffer) -> Result<(), StarlitError> {

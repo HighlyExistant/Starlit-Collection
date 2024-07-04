@@ -1,6 +1,6 @@
-use std::{alloc::Layout, marker::PhantomData, ops::IndexMut, os::raw::c_void, ptr::NonNull, slice::SliceIndex, sync::{Arc, Mutex}};
+use std::{alloc::Layout, marker::PhantomData, ops::IndexMut, os::raw::c_void, ptr::NonNull, slice::SliceIndex, sync::{atomic::AtomicI32, Arc, Mutex}};
 
-use nightfall_core::{barriers::Barriers, buffers::Buffer, commands::{BufferCopy, CommandBufferBeginInfo, CommandPoolAllocation}, descriptors::DescriptorBufferInfo, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DevicePointer}, queue::{Queue, Submission}, sync::Fence, AsNfptr, NfPtr, NfPtrType};
+use nightfall_core::{barriers::Barriers, buffers::Buffer, commands::{BufferCopy, CommandBufferBeginInfo, CommandPoolAllocation}, descriptors::DescriptorBufferInfo, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DevicePointer}, queue::{Queue, Submission}, sync::Fence, AsNfptr, AsNfptrType, NfPtr, NfPtrType};
 use crate::{alloc::{GeneralAllocator, HostDeviceConversions}, error::StarlitError, GetBufferInfo};
 
 #[derive(Debug)]
@@ -28,6 +28,9 @@ impl<T, A: GeneralAllocator + ?Sized> SlRawVec<T, A> {
         Self { pointer: None, capacity: 0, alloc, allocation: NfPtr::new(0, 0, None, 0) }
     }
     pub fn with_capacity(capacity: usize, alloc: Arc<A>) -> Result<Self, StarlitError> {
+        unsafe { SL_VEC_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) };
+        let loaded = unsafe { SL_VEC_COUNTER.load(std::sync::atomic::Ordering::Relaxed) };
+        println!("Allocated Vector {}", loaded);
         if capacity == 0 {
             return Ok(Self { pointer: None, allocation: unsafe { NfPtr::dangling() }, capacity: 0, alloc: alloc.clone() });
         }
@@ -37,8 +40,8 @@ impl<T, A: GeneralAllocator + ?Sized> SlRawVec<T, A> {
         };
         // let pointer = alloc.allocate allocate(layout).unwrap().cast::<T>();
         let allocation = alloc.allocate(layout)?;
-        let pointer = alloc.as_host_ptr(allocation).map(|val|{NonNull::new(val as *mut _).unwrap()});
-        Ok(Self { pointer, capacity, alloc, allocation,  })
+        let pointer = alloc.as_host_ptr(allocation.clone()).map(|val|{NonNull::new(val as *mut _).unwrap()});
+        Ok(Self { pointer, capacity, alloc, allocation })
     }
     #[inline(always)]
     pub fn capacity(&self) -> usize {
@@ -72,14 +75,14 @@ impl<T, A: GeneralAllocator + ?Sized> SlRawVec<T, A> {
         }?;
         self.capacity = cap;
         self.allocation = memory;
-        self.pointer = self.alloc.as_host_mut_ptr(self.allocation).map(|val|{ NonNull::new(val).unwrap().cast() });
+        self.pointer = self.alloc.as_host_mut_ptr(self.allocation.clone()).map(|val|{ NonNull::new(val).unwrap().cast() });
         Ok(())
     }
     pub fn reserve_for_push(&mut self, len: usize) {
         self.grow_amortized(len, 1).unwrap();
     }
     pub fn get_allocation(&self) -> NfPtr {
-        self.allocation
+        self.allocation.clone()
     }
     #[inline]
     pub fn ptr(&self) -> Option<*mut T> {
@@ -93,13 +96,13 @@ impl<T, A: GeneralAllocator + ?Sized> SlRawVec<T, A> {
                 let align = std::mem::align_of::<T>();
                 let size = std::mem::size_of::<T>().wrapping_mul(self.capacity());
                 let layout = Layout::from_size_align_unchecked(size, align);
-                Some((self.allocation, layout))
+                Some((self.allocation.clone(), layout))
             }
         }
     }
     pub unsafe fn from_raw_parts(ptr: NfPtrType<T>, capacity: usize, alloc: Arc<A>) -> Self {
-        let nfptr = ptr.into();
-        let pointer = alloc.as_host_mut_ptr(nfptr).as_ref().map(|ptr|{ NonNull::new_unchecked(ptr.cast::<T>()) });
+        let nfptr: NfPtr = ptr.into();
+        let pointer = alloc.as_host_mut_ptr(nfptr.clone()).as_ref().map(|ptr|{ NonNull::new_unchecked(ptr.cast::<T>()) });
         Self { pointer, allocation: nfptr, capacity, alloc }
         //Self { ptr: unsafe { Unique::new_unchecked(ptr) }, cap, alloc }
     }
@@ -107,6 +110,7 @@ impl<T, A: GeneralAllocator + ?Sized> SlRawVec<T, A> {
         self.alloc.clone()
     }
 }
+static mut SL_VEC_COUNTER: AtomicI32 = AtomicI32::new(0);
 /// Heavily based off of rusts implementation of [`Vec`]
 #[derive(Debug)]
 pub struct SlVec<T, A: GeneralAllocator + ?Sized> {
@@ -116,6 +120,9 @@ pub struct SlVec<T, A: GeneralAllocator + ?Sized> {
 
 impl<T, A: GeneralAllocator + ?Sized> SlVec<T, A> {
     pub fn new(alloc: Arc<A>) -> Self {
+        unsafe { SL_VEC_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) };
+        let loaded = unsafe { SL_VEC_COUNTER.load(std::sync::atomic::Ordering::Relaxed) };
+        println!("Allocated Vector {}", loaded);
         SlVec { buf: SlRawVec::new(alloc.clone()), len: 0 }
     }
     pub fn new_zeroed(len: usize, alloc: Arc<A>) -> Result<Self, StarlitError> {
@@ -156,7 +163,7 @@ impl<T, A: GeneralAllocator + ?Sized> SlVec<T, A> {
     }
     #[inline]
     pub fn device_ptr(&self) -> Result<DevicePointer, StarlitError> {
-        self.buf.alloc.as_device_ptr(self.buf.allocation).ok_or(StarlitError::NotDeviceAddressable)
+        self.buf.alloc.as_device_ptr(self.buf.allocation.clone()).ok_or(StarlitError::NotDeviceAddressable)
     }
     pub fn insert(&mut self, index: usize, element: T) {
         #[cold]
@@ -280,21 +287,21 @@ impl<T, A: GeneralAllocator + ?Sized> SlVec<T, A> {
     pub fn copy_with_fence<O: GeneralAllocator>(&mut self, other: &SlVec<T, O>, length: usize, queue: Arc<Queue>, command_buffer: &CommandPoolAllocation) -> Result<Arc<Fence>, StarlitError> {
         self.copy_allocation_with_fence(other.get_allocation(), length*std::mem::size_of::<T>(), queue.clone(), command_buffer)
     }
-    pub fn record_copy_allocation_from_with_barrier(&mut self, device: Arc<LogicalDevice>, allocation: NfPtr, size: usize, dst: PipelineStageFlags, command_buffer: &CommandPoolAllocation) -> Result<Barriers, StarlitError> {
+    pub fn copy_recorded_from_barriered(&mut self, device: Arc<LogicalDevice>, allocation: NfPtr, size: usize, dst: PipelineStageFlags, command_buffer: &CommandPoolAllocation) -> Result<Barriers, StarlitError> {
         command_buffer.copy_buffer(allocation.buffer(), self.buf.allocation.buffer(), &[BufferCopy {
             src_offset: allocation.offset() as u64,
             dst_offset: self.buf.allocation.offset() as u64,
             size: size as u64,
         }]);
-        Ok(Barriers::new(PipelineStageFlags::TRANSFER, dst, vec![], vec![], vec![allocation.as_buffer_memory_barrier(AccessFlags::TRANSFER_WRITE, AccessFlags::empty())]))
+        Ok(Barriers::new(PipelineStageFlags::TRANSFER, dst, vec![], vec![], vec![allocation.as_buffer_memory_barrier(AccessFlags::TRANSFER_WRITE, AccessFlags::MEMORY_READ|AccessFlags::MEMORY_READ)]))
     }
-    pub fn record_copy_allocation_to_with_barrier(&mut self, device: Arc<LogicalDevice>, allocation: NfPtr, size: usize, dst: PipelineStageFlags, command_buffer: &CommandPoolAllocation) -> Result<Barriers, StarlitError> {
+    pub fn copy_recorded_to_barriered(&mut self, device: Arc<LogicalDevice>, allocation: NfPtr, size: usize, dst: PipelineStageFlags, command_buffer: &CommandPoolAllocation) -> Result<Barriers, StarlitError> {
         command_buffer.copy_buffer(self.buf.allocation.buffer(), allocation.buffer(), &[BufferCopy {
             dst_offset: allocation.offset() as u64,
             src_offset: self.buf.allocation.offset() as u64,
             size: size as u64,
         }]);
-        Ok(Barriers::new(PipelineStageFlags::TRANSFER, dst, vec![], vec![], vec![allocation.as_buffer_memory_barrier(AccessFlags::TRANSFER_WRITE, AccessFlags::empty())]))
+        Ok(Barriers::new(PipelineStageFlags::TRANSFER, dst, vec![], vec![], vec![allocation.as_buffer_memory_barrier(AccessFlags::TRANSFER_WRITE, AccessFlags::MEMORY_READ|AccessFlags::MEMORY_READ)]))
     }
     pub fn copy_allocation_with_fence(&mut self, allocation: NfPtr, size: usize, queue: Arc<Queue>, command_buffer: &CommandPoolAllocation) -> Result<Arc<Fence>, StarlitError> {
         command_buffer.begin(CommandBufferBeginInfo::SINGLE_SUBMIT).unwrap();
@@ -307,6 +314,14 @@ impl<T, A: GeneralAllocator + ?Sized> SlVec<T, A> {
         let mut submission = Submission::new();
         submission.add_command_buffer(command_buffer.get_command_buffer());
         queue.submit_with_fence(&[&submission]).map_err(StarlitError::from)
+    }
+    /// len is in terms of T so the size of the allocation
+    /// must be len*std::mem::size_of::<T>()
+    pub fn new_recorded_from_barriered(allocation: NfPtr, len: usize, dst: PipelineStageFlags, command_buffer: &CommandPoolAllocation, alloc: Arc<A>) -> Result<(Self, Barriers), StarlitError> {
+        let mut new_zeroed = Self::new_zeroed(len, alloc.clone())?;
+        
+        let barrier = new_zeroed.copy_recorded_from_barriered(alloc.get_device(), allocation, len*std::mem::size_of::<T>(), dst, command_buffer)?;
+        Ok((new_zeroed, barrier))
     }
     unsafe fn append_elements(&mut self, other: *const [T]) {
         let count = unsafe { (*other).len() };
@@ -330,6 +345,9 @@ impl<T, A: GeneralAllocator + ?Sized> SlVec<T, A> {
             other.set_len(0);
         }
     }
+    pub fn device(&self) -> Arc<LogicalDevice> {
+        self.buf.alloc.get_device()
+    }
 }
 impl<T, A: GeneralAllocator + ?Sized> std::ops::Index<usize> for SlVec<T, A> {
     fn index(&self, index: usize) -> &Self::Output {
@@ -343,17 +361,31 @@ impl<T, A: GeneralAllocator + ?Sized> IndexMut<usize> for SlVec<T, A> {
         unsafe { self.buf.ptr().unwrap().add(index).as_mut().unwrap() }
     }
 }
-impl<T, A: GeneralAllocator + ?Sized> Drop for SlVec<T, A> {
+// impl<T, A: GeneralAllocator + ?Sized> Drop for SlVec<T, A> {
+//     fn drop(&mut self) {
+//         // if self.capacity() != 0 {
+//         //     self.buf.alloc.deallocate(self.buf.allocation.clone(), Layout::from_size_align(self.len*std::mem::size_of::<T>(), std::mem::align_of::<T>()).unwrap()).unwrap();
+//         // }
+//     }
+// }
+impl<T, A: GeneralAllocator + ?Sized> Drop for SlRawVec<T, A> {
     fn drop(&mut self) {
-        println!("Dropped Vector");
+        let loaded = unsafe { SL_VEC_COUNTER.load(std::sync::atomic::Ordering::Relaxed) };
+        unsafe { SL_VEC_COUNTER.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) };
+        println!("Dropped Vector {}", loaded);
         if self.capacity() != 0 {
-            self.buf.alloc.deallocate(self.buf.allocation, Layout::from_size_align(self.len*std::mem::size_of::<T>(), std::mem::align_of::<T>()).unwrap()).unwrap();
+            self.alloc.deallocate(self.allocation.clone(), Layout::from_size_align(self.capacity*std::mem::size_of::<T>(), std::mem::align_of::<T>()).unwrap()).unwrap();
         }
     }
 }
 unsafe impl<T, A: GeneralAllocator + ?Sized> AsNfptr for SlVec<T, A> {
     unsafe fn as_nfptr(&self) -> NfPtr {
-        self.buf.allocation
+        self.buf.allocation.clone()
+    }
+}
+impl<T, A: GeneralAllocator + ?Sized> AsNfptrType<T> for SlVec<T, A> {
+    fn as_nfptr_ty(&self) -> Result<NfPtrType<T>, nightfall_core::error::NightfallError> {
+       self.buf.allocation.cast::<T>()
     }
 }
 pub struct VkBufferIterator<'a, T> {

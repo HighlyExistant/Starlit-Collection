@@ -7,20 +7,20 @@ use crate::{algorithms::{StarlitShaderKernel, StarlitShaderKernelConstants, Star
 
 use super::histogram::Radix256HistogramInputDSPC;
 /// Push Constant for Radix256DigitBinningPass for Descriptor Sets
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Radix256DigitBinningPassInputDSPC {
     thread_blocks: u32,
     radix_shift: u32,
     num_keys: u32,
     uses_debug: u32,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Radix256DigitBinningPassPushConstant {
     pub thread_blocks: u32,
     pub radix_shift: u32,
     pub num_keys: u32,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Radix256DigitBinningPassInput {
     pub thread_blocks: u32,
     pub radix_shift: u32,
@@ -99,7 +99,7 @@ impl StarlitShaderKernel for Radix256DigitBinningPass {
                     .add_storage_buffer(sets[1].set(), 1, 1, 0, &input.histogram_pass_inout.as_descriptor_buffer_info())
                     .add_storage_buffer(sets[1].set(), 1, 2, 0, &input.alternate_buffer.as_descriptor_buffer_info())
                     .add_storage_buffer(sets[1].set(), 1, 3, 0, &input.sorting_buffer.as_descriptor_buffer_info());
-                if let Some(debug) = input.debug {
+                if let Some(debug) = &input.debug {
                     writer.push_storage_buffer(sets[0].set(), 1, 4, 0, &debug.as_descriptor_buffer_info());
                     writer.push_storage_buffer(sets[1].set(), 1, 4, 0, &debug.as_descriptor_buffer_info());
                 }
@@ -109,11 +109,11 @@ impl StarlitShaderKernel for Radix256DigitBinningPass {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: ash::vk::CommandBuffer) -> Result<(), StarlitError> {
-        if let Some(input) = self.state.input {
+        if let Some(input) = &self.state.input {
             match &self.state.strategy {
                 StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                     let dspc = Radix256DigitBinningPassInputDSPC {

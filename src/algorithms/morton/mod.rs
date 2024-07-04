@@ -21,7 +21,7 @@ struct AABBMortonCodeCalculatorInputDAPC {
     pub total: u32,
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct AABBMortonCodeCalculatorInput {
     /// count of all aabb's
     pub total: u32,
@@ -108,7 +108,7 @@ impl StarlitShaderKernel for AABBMortonCodeCalculator {
                 return Err(crate::error::StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: vk::CommandBuffer) -> Result<(), crate::error::StarlitError> {
@@ -186,7 +186,7 @@ impl StarlitShaderKernel for AABBMortonCodeCalculator {
 impl StarlitShaderExecute for AABBMortonCodeCalculator {
     type Input = <Self as StarlitShaderKernel>::Input;
     fn execute(&mut self, command_buffer: &nightfall_core::commands::CommandPoolAllocation, input: &Self::Input) -> Result<(), crate::error::StarlitError> {
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         match &self.state.strategy {
             StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                 let writer = nightfall_core::descriptors::DescriptorWriter::new()
@@ -260,7 +260,7 @@ pub struct Morton32ToMorton64InputDAPC {
     pub idx: DevicePointer,
     pub m64: DevicePointer,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Morton32ToMorton64Input {
     pub total: u32,
     pub m32: NfPtr,
@@ -329,7 +329,7 @@ impl StarlitShaderKernel for Morton32ToMorton64 {
                 let writer = nightfall_core::descriptors::DescriptorWriter::new()
                     .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.m32.as_descriptor_buffer_info())
                     .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.idx.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.m32.as_descriptor_buffer_info());
+                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.m64.as_descriptor_buffer_info());
                 writer.write(self.pipeline.device());
             }
             StarlitStrategyInternal::UsesDeviceAddress => {
@@ -339,11 +339,11 @@ impl StarlitShaderKernel for Morton32ToMorton64 {
 
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: vk::CommandBuffer) -> Result<(), crate::error::StarlitError> {
-        if let Some(input) = self.state.input {
+        if let Some(input) = &self.state.input {
             match &self.state.strategy {
                 StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                     let dspc = Morton32ToMorton64InputDSPC {
@@ -422,7 +422,7 @@ impl StarlitShaderExecute for Morton32ToMorton64 {
                 let writer = nightfall_core::descriptors::DescriptorWriter::new()
                     .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.m32.as_descriptor_buffer_info())
                     .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.idx.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.m32.as_descriptor_buffer_info());
+                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.m64.as_descriptor_buffer_info());
                 writer.write(self.pipeline.device());
 
                 let dspc = AABBMortonCodeCalculatorInputDSPC {
@@ -456,7 +456,7 @@ impl StarlitShaderExecute for Morton32ToMorton64 {
                 panic!("Not Implemented");
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn execute_with_barrier(&mut self, command_buffer: &nightfall_core::commands::CommandPoolAllocation, input: &Self::Input) -> Result<Option<Barriers>, crate::error::StarlitError> {

@@ -25,3 +25,4 @@ glslc src\algorithms\range\shaders\range.comp -o src\algorithms\range\build\rang
 glslc src\algorithms\csdlfe\shaders\csdlfe.comp --target-env=vulkan1.1 -o src\algorithms\csdlfe\build\csdlfe.comp.spv 
 
 glslc src\algorithms\memory\shaders\scatter_ds.comp -o src\algorithms\memory\build\scatter_ds.comp.spv 
+glslc src\algorithms\memory\shaders\set_ds.comp -o src\algorithms\memory\build\set_ds.comp.spv 

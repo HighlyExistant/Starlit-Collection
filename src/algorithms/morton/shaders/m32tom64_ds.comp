@@ -3,13 +3,13 @@
 #extension GL_EXT_buffer_reference_uvec2 : require
 // #pragma use_vulkan_memory_model
 layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
-layout(binding = 0) buffer M32 {
+layout(binding = 0) readonly buffer M32 {
     uint val[];
 } m32;
-layout(binding = 1) buffer Index {
+layout(binding = 1) readonly buffer Index {
     uint val[];
 } idx;
-layout(binding = 2) buffer M64 {
+layout(binding = 2) writeonly buffer M64 {
     uvec2 val[];
 } m64;
 layout(push_constant, std430) uniform PushConstants {
@@ -17,6 +17,6 @@ layout(push_constant, std430) uniform PushConstants {
 } pc;
 void main() {
     if (gl_GlobalInvocationID.x < pc.total) {
-        m64.val[gl_GlobalInvocationID.x] = uvec2(m32.val[gl_GlobalInvocationID.x], idx.val[gl_GlobalInvocationID.x]);
+        m64.val[gl_GlobalInvocationID.x] = uvec2(idx.val[gl_GlobalInvocationID.x], m32.val[gl_GlobalInvocationID.x]);
     }
 }

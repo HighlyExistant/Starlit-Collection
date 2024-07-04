@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk;
-use nightfall_core::{barriers::Barriers, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorLayoutBuilder, DescriptorSetAllocation, DescriptorSetLayoutCreateFlags, DescriptorType, DescriptorWriter}, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DependencyFlags}, pipeline::{compute::ComputePipeline, shader::Shader, layout::{self, PipelineLayout, PipelineLayoutBuilder}, shader::{ShaderCreateInfo, ShaderStageFlags}}, NfPtr};
+use nightfall_core::{barriers::Barriers, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorLayoutBuilder, DescriptorSetAllocation, DescriptorSetLayoutCreateFlags, DescriptorType, DescriptorWriter}, device::LogicalDevice, image::PipelineStageFlags, memory::{AccessFlags, DependencyFlags}, pipeline::{compute::ComputePipeline, layout::{self, PipelineLayout, PipelineLayoutBuilder}, shader::{Shader, ShaderCreateInfo, ShaderStageFlags}}, NfPtr, NfPtrType};
 use starlit_alloc::GeneralAllocator;
 
 use crate::{error::StarlitError, SlVec};
@@ -19,8 +19,8 @@ use super::{onesweep::tuning::TuningParameters, StarlitShaderAlgorithm, StarlitS
 
 pub struct DeviceRadixSortPairsState<A: GeneralAllocator + ?Sized> {
     pub global_histogram: SlVec<u32, A>,
-    pub sort: NfPtr,
-    pub payload: NfPtr,
+    pub sort: NfPtrType<u32>,
+    pub payload: NfPtrType<u32>,
     pub alt: SlVec<u32, A>,
     pub alt_payload: SlVec<u32, A>,
     pub pass: SlVec<u32, A>,
@@ -34,8 +34,8 @@ pub struct DeviceRadixSortPairsPC {
     radix_shift: u32,
 }
 pub struct DeviceRadixSortPairsInput {
-    pub sort: NfPtr,
-    pub payload: NfPtr,
+    pub sort: NfPtrType<u32>,
+    pub payload: NfPtrType<u32>,
     pub num_keys: usize,
 }
 /// Uses an old radix sorting algorithm with 3N memory movement, but doesn't need
@@ -97,8 +97,8 @@ impl<A: GeneralAllocator + ?Sized> DeviceRadixSortPairs<A> {
             DependencyFlags::empty(), 
             &[], 
             &[
-                input.global_histogram.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE),
-                input.pass.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE),
+                input.global_histogram.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ),
+                input.pass.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE|AccessFlags::SHADER_READ, AccessFlags::SHADER_WRITE|AccessFlags::SHADER_READ),
                 ], 
             &[]
         );
@@ -110,8 +110,8 @@ impl<A: GeneralAllocator + ?Sized> DeviceRadixSortPairs<A> {
             DependencyFlags::empty(), 
             &[], 
             &[
-                input.sort.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE),
-                input.alt.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE),
+                input.sort.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ),
+                input.alt.get_allocation().as_buffer_memory_barrier(AccessFlags::SHADER_WRITE|AccessFlags::SHADER_READ, AccessFlags::SHADER_WRITE|AccessFlags::SHADER_READ),
                 ], 
             &[]
         );
@@ -210,7 +210,7 @@ impl<A: GeneralAllocator + ?Sized> StarlitShaderAlgorithm<A> for DeviceRadixSort
             }
             prev_input.num_keys = input.num_keys;
             prev_input.thread_blocks = thread_blocks as usize;
-            prev_input.sort = input.sort;
+            prev_input.sort = input.sort.clone();
         } else {
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             let mut state = DeviceRadixSortPairsState {
@@ -220,8 +220,8 @@ impl<A: GeneralAllocator + ?Sized> StarlitShaderAlgorithm<A> for DeviceRadixSort
                 pass: SlVec::new(self.freelist.clone()),
                 num_keys: input.num_keys,
                 thread_blocks: thread_blocks as usize,
-                sort: input.sort,
-                payload: input.payload,
+                sort: input.sort.clone(),
+                payload: input.payload.clone(),
             };
             Self::initialize_buffers(self.freelist.clone(), &mut state, thread_blocks as usize, input.num_keys as usize);
             Self::initialize_static_buffers(self.freelist.clone(), &mut state, thread_blocks as usize);
@@ -312,9 +312,9 @@ impl<A: GeneralAllocator + ?Sized> StarlitShaderExecute for DeviceRadixSortPairs
     }
     fn execute_with_barrier(&mut self, command_buffer: &nightfall_core::commands::CommandPoolAllocation, input: &Self::Input) -> Result<Option<nightfall_core::barriers::Barriers>, StarlitError> {
         self.execute(command_buffer, input);
-        let payload = input.payload.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE);
-        let sort = input.sort.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_WRITE);
-        Ok(Some(Barriers::new(PipelineStageFlags::COMPUTE_SHADER, PipelineStageFlags::COMPUTE_SHADER, vec![], vec![], vec![
+        let payload = input.payload.as_buffer_memory_barrier(AccessFlags::MEMORY_READ|AccessFlags::MEMORY_WRITE, AccessFlags::MEMORY_READ|AccessFlags::MEMORY_WRITE);
+        let sort = input.sort.as_buffer_memory_barrier(AccessFlags::MEMORY_READ|AccessFlags::MEMORY_WRITE, AccessFlags::MEMORY_READ|AccessFlags::MEMORY_WRITE);
+        Ok(Some(Barriers::new(PipelineStageFlags::COMPUTE_SHADER, PipelineStageFlags::ALL_COMMANDS, vec![], vec![], vec![
             payload, 
             sort
         ])))

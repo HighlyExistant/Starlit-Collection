@@ -9,7 +9,7 @@ use crate::{algorithms::{StarlitShaderKernel, StarlitStrategyInternal, StarlitSt
 pub struct Radix256ResetInputDSPC {
     thread_blocks: u32,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Radix256ResetInput {
     pub thread_blocks: u32,
     pub histogram_out: NfPtr,
@@ -70,11 +70,11 @@ impl StarlitShaderKernel for Radix256Reset {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: ash::vk::CommandBuffer) -> Result<(), StarlitError> {
-        if let Some(input) = self.state.input {
+        if let Some(input) = &self.state.input {
             match &self.state.strategy {
                 StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                     let dspc = Radix256ResetInputDSPC {

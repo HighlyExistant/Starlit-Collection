@@ -200,7 +200,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for DeviceRadixSort<A> {
             }
             prev_input.num_keys = input.num_keys;
             prev_input.thread_blocks = thread_blocks as usize;
-            prev_input.sort = input.sort;
+            prev_input.sort = input.sort.clone();
         } else {
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             let mut state = DeviceRadixSortState {
@@ -209,7 +209,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for DeviceRadixSort<A> {
                 pass: SlVec::new(self.freelist.clone()),
                 num_keys: input.num_keys,
                 thread_blocks: thread_blocks as usize,
-                sort: input.sort,
+                sort: input.sort.clone(),
             };
             Self::initialize_buffers(self.freelist.clone(), &mut state, thread_blocks as usize, input.num_keys as usize);
             Self::initialize_static_buffers(self.freelist.clone(), &mut state, thread_blocks as usize);

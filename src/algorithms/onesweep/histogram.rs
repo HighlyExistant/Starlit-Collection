@@ -12,7 +12,7 @@ pub struct Radix256HistogramInputDSPC {
     pub thread_blocks: u32,
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Radix256HistogramInput {
     pub num_keys: u32,
     pub thread_blocks: u32,
@@ -89,11 +89,11 @@ impl StarlitShaderKernel for Radix256Histogram {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: vk::CommandBuffer) -> Result<(), StarlitError> {
-        if let Some(input) = self.state.input {
+        if let Some(input) = &self.state.input {
             match &self.state.strategy {
                 StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                     let dspc = Radix256HistogramInputDSPC {

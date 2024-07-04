@@ -12,7 +12,7 @@ pub struct DeviceRangeInputDSPC {
     start: u32,
     size: u32,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct DeviceRangeInput {
     /// start of the iteration
     pub start: u32,
@@ -77,7 +77,7 @@ impl StarlitShaderKernel for DeviceRange {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         }
-        self.state.input = Some(*input);
+        self.state.input = Some(input.clone());
         Ok(())
     }
     fn input(&self, command_buffer: vk::CommandBuffer) -> Result<(), StarlitError> {
@@ -144,7 +144,7 @@ impl StarlitShaderExecute for DeviceRange {
                     start: input.start,
                     size: input.end,
                 };
-                self.state.input = Some(*input);
+                self.state.input = Some(input.clone());
                 self.device.push_constants(command_buffer.get_command_buffer(), self.layout.get_layout(), ShaderStageFlags::COMPUTE, 0, &dspc);
                 unsafe { 
                     self.range.device().device().cmd_bind_descriptor_sets(

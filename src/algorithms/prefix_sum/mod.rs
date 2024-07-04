@@ -5,7 +5,7 @@ use nightfall_core::{buffers::BufferOffset, descriptors::{DescriptorLayoutBuilde
 use super::{StarlitStrategy, StarlitStrategyInternal, Strategy};
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct InclusivePrefixSumCalculatorInput {
     pub monoid_in: NfPtr,
     pub monoid_out: NfPtr,

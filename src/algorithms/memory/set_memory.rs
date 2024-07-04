@@ -1,35 +1,34 @@
 use std::sync::Arc;
 
 use ash::vk;
-use nightfall_core::{barriers::Barriers, descriptors::{DescriptorLayoutBuilder, DescriptorType}, image::PipelineStageFlags, memory::AccessFlags, pipeline::{compute::ComputePipeline, layout::{PipelineLayout, PipelineLayoutBuilder}, shader::{ShaderCreateInfo, ShaderStageFlags}}, NfPtr, NfPtrType};
+use nightfall_core::{barriers::Barriers, descriptors::{DescriptorLayoutBuilder, DescriptorType}, image::PipelineStageFlags, memory::AccessFlags, pipeline::{compute::ComputePipeline, layout::{PipelineLayout, PipelineLayoutBuilder}, shader::{ShaderCreateInfo, ShaderStageFlags}}, NfPtr};
 
 use crate::algorithms::{StarlitShaderExecute, StarlitShaderKernel, StarlitStrategyInternal, StarlitStrategyState, Strategy};
 
 #[repr(C)]
 #[derive(Clone, Default)]
-pub struct ScatterMemoryInputDSPC {
-    pub index_count: u32,
+pub struct SetMemoryInputDSPC {
+    pub count: u32,
     // in terms of u32
-    pub payload_size: u32,
+    pub size: u32,
 }
 #[repr(C)]
 #[derive(Clone)]
-pub struct ScatterMemoryInput {
-    pub index_count: u32,
-    pub payload_size: u32,
-    pub indices: NfPtrType<u32>,
-    pub payload_src: NfPtr,
-    pub payload_dst: NfPtr,
+pub struct SetMemoryInput {
+    pub count: u32,
+    pub size: u32,
+    pub set_in: NfPtr,
+    pub mem_out: NfPtr,
 }
-pub struct ScatterMemory {
+pub struct SetMemory {
     pipeline: Arc<ComputePipeline>,
     layout: Arc<PipelineLayout>,
-    state: StarlitStrategyState<ScatterMemoryInput>,
+    state: StarlitStrategyState<SetMemoryInput>,
 }
 
-const SCATTER_MEMORY_DS: &[u8] = include_bytes!("build/scatter_ds.comp.spv");
-impl StarlitShaderKernel for ScatterMemory {
-    type Input = ScatterMemoryInput;
+const SCATTER_MEMORY_DS: &[u8] = include_bytes!("build/set_ds.comp.spv");
+impl StarlitShaderKernel for SetMemory {
+    type Input = SetMemoryInput;
     fn strategy(device: Arc<nightfall_core::device::LogicalDevice>, strategy: crate::algorithms::StarlitStrategy) -> Result<Self, crate::error::StarlitError> {
         let (layout, strategy, shader) = match strategy.strategy {
             Strategy::UsesDescriptorSets { pool } => {
@@ -49,7 +48,7 @@ impl StarlitShaderKernel for ScatterMemory {
                     .build(device.clone());
                 let layout = PipelineLayoutBuilder::new()
                     .add_descriptor_layout(desc_layout.layout())
-                    .add_push_constant::<ScatterMemoryInputDSPC>(ShaderStageFlags::COMPUTE)
+                    .add_push_constant::<SetMemoryInputDSPC>(ShaderStageFlags::COMPUTE)
                     .build(device.clone());
                 let sets = pool.allocate(&[desc_layout])?.collect::<_>();
                 (layout, StarlitStrategyInternal::UsesDescriptorSets { sets }, shader)
@@ -66,9 +65,8 @@ impl StarlitShaderKernel for ScatterMemory {
         match &self.state.strategy {
             StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                 let writer = nightfall_core::descriptors::DescriptorWriter::new()
-                    .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.indices.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.payload_src.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.payload_dst.as_descriptor_buffer_info());
+                    .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.set_in.as_descriptor_buffer_info())
+                    .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.mem_out.as_descriptor_buffer_info());
                 writer.write(self.pipeline.device());
             }
             StarlitStrategyInternal::UsesDeviceAddress => {
@@ -86,9 +84,9 @@ impl StarlitShaderKernel for ScatterMemory {
         if let Some(input) = &self.state.input {
             match &self.state.strategy {
                 StarlitStrategyInternal::UsesDescriptorSets { sets } => {
-                    let dspc = ScatterMemoryInputDSPC {
-                        index_count: input.index_count,
-                        payload_size: input.payload_size,
+                    let dspc = SetMemoryInputDSPC {
+                        count: input.count,
+                        size: input.size,
                     };
                     self.pipeline.device().push_constants(
                         command_buffer, 
@@ -128,13 +126,13 @@ impl StarlitShaderKernel for ScatterMemory {
     fn dispatch_with_barrier(&self, command_buffer: vk::CommandBuffer, dispatch_x: u32, dispatch_y: u32, dispatch_z: u32) -> Option<Barriers> {
         self.dispatch(command_buffer, dispatch_x, dispatch_y, dispatch_z);
         let input = self.state.input.as_ref().expect("no input has been registered");
-        let mut barrier = input.payload_dst.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ|AccessFlags::SHADER_WRITE);
+        let mut barrier = input.mem_out.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ|AccessFlags::SHADER_WRITE);
         Some(Barriers::new(PipelineStageFlags::COMPUTE_SHADER, PipelineStageFlags::COMPUTE_SHADER, vec![], vec![], vec![barrier]))
     }
     fn dispatch_indirect_with_barrier(&self, command_buffer: vk::CommandBuffer, indirect: nightfall_core::buffers::BufferOffset) -> Option<Barriers> {
         self.dispatch_indirect(command_buffer, indirect);
         let input = self.state.input.as_ref().expect("no input has been registered");
-        let mut barrier = input.payload_dst.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ|AccessFlags::SHADER_WRITE);
+        let mut barrier = input.mem_out.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ|AccessFlags::SHADER_WRITE);
         Some(Barriers::new(PipelineStageFlags::COMPUTE_SHADER, PipelineStageFlags::COMPUTE_SHADER, vec![], vec![], vec![barrier]))
     }
     fn get_state(&self) -> &StarlitStrategyState<Self::Input> {
@@ -143,20 +141,19 @@ impl StarlitShaderKernel for ScatterMemory {
 }
 
 
-impl StarlitShaderExecute for ScatterMemory {
+impl StarlitShaderExecute for SetMemory {
     type Input = <Self as StarlitShaderKernel>::Input;
     fn execute(&mut self, command_buffer: &nightfall_core::commands::CommandPoolAllocation, input: &Self::Input) -> Result<(), crate::error::StarlitError> {
         match &self.state.strategy {
             StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                 let writer = nightfall_core::descriptors::DescriptorWriter::new()
-                    .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.indices.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.payload_src.as_descriptor_buffer_info())
-                    .add_storage_buffer(sets[0].set(), 1, 2, 0, &input.payload_dst.as_descriptor_buffer_info());
+                    .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.set_in.as_descriptor_buffer_info())
+                    .add_storage_buffer(sets[0].set(), 1, 1, 0, &input.mem_out.as_descriptor_buffer_info());
                 writer.write(self.pipeline.device());
 
-                let dspc = ScatterMemoryInputDSPC {
-                    index_count: input.index_count,
-                    payload_size: input.payload_size,
+                let dspc = SetMemoryInputDSPC {
+                    count: input.count,
+                    size: input.size,
                 };
                 self.pipeline.device().push_constants(
                     command_buffer.get_command_buffer(), 
@@ -177,7 +174,7 @@ impl StarlitShaderExecute for ScatterMemory {
                     ) 
                 }
                 self.bind(command_buffer.get_command_buffer());
-                self.dispatch(command_buffer.get_command_buffer(), input.index_count.div_ceil(1024), 1, 1);
+                self.dispatch(command_buffer.get_command_buffer(), input.count.div_ceil(1024), 1, 1);
             }
             StarlitStrategyInternal::UsesDeviceAddress => {
                 panic!("Not Implemented");
@@ -191,7 +188,7 @@ impl StarlitShaderExecute for ScatterMemory {
     }
     fn execute_with_barrier(&mut self, command_buffer: &nightfall_core::commands::CommandPoolAllocation, input: &Self::Input) -> Result<Option<Barriers>, crate::error::StarlitError> {
         self.execute(command_buffer, input)?;
-        let barrier = input.payload_dst.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ);
+        let barrier = input.mem_out.as_buffer_memory_barrier(AccessFlags::SHADER_WRITE, AccessFlags::SHADER_READ);
         let barriers = Barriers::new(PipelineStageFlags::COMPUTE_SHADER, PipelineStageFlags::COMPUTE_SHADER, vec![], vec![], vec![
             barrier
         ]);
@@ -205,12 +202,12 @@ mod test {
     use std::sync::Arc;
 
     use ash::vk::SubmitInfo;
-    use nightfall_core::{buffers::{BufferUsageFlags, MemoryPropertyFlags}, commands::{CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags}, descriptors::{DescriptorPoolBuilder, DescriptorPoolCreateFlags, DescriptorType}, device::{LogicalDevice, LogicalDeviceBuilder}, instance::InstanceBuilder, queue::{DeviceQueueCreateFlags, Queue, QueueFlags}, sync::Fence, AsNfptr, AsNfptrType, Version};
+    use nightfall_core::{buffers::{BufferUsageFlags, MemoryPropertyFlags}, commands::{CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags}, descriptors::{DescriptorPoolBuilder, DescriptorPoolCreateFlags, DescriptorType}, device::{LogicalDevice, LogicalDeviceBuilder}, instance::InstanceBuilder, queue::{DeviceQueueCreateFlags, Queue, QueueFlags}, sync::Fence, AsNfptr, Version};
     use starlit_alloc::{GeneralAllocator, GpuAllocators, StandardAllocator};
 
-    use crate::{algorithms::{StarlitShaderExecute, StarlitShaderKernel, StarlitStrategy}, SlVec};
+    use crate::{algorithms::{StarlitShaderExecute, StarlitShaderKernel, StarlitStrategy}, SlBox, SlVec};
 
-    use super::{ScatterMemory, ScatterMemoryInput};
+    use super::{SetMemory, SetMemoryInput};
 
     fn barebones() -> (Arc<LogicalDevice>, impl ExactSizeIterator<Item = Arc<Queue>>) {
         let instance = InstanceBuilder::new()
@@ -230,7 +227,7 @@ mod test {
             .build(physical_device.clone()).unwrap()
     }
     #[test]
-    fn scatter_test() {
+    fn set_test() {
         let (device, mut queues) = barebones();
         let compute_queue = queues.next().unwrap();
         let descriptor_pool = DescriptorPoolBuilder::new()
@@ -240,22 +237,19 @@ mod test {
             .add_pool_size(DescriptorType::UNIFORM_BUFFER, 8)
             .add_pool_size(DescriptorType::COMBINED_IMAGE_SAMPLER, 8)
             .build(compute_queue.device());
-        let mut scatter = ScatterMemory::strategy(device.clone(), StarlitStrategy::new(crate::algorithms::Strategy::UsesDescriptorSets { pool: descriptor_pool.clone() }, false)).unwrap();
+        let mut set = SetMemory::strategy(device.clone(), StarlitStrategy::new(crate::algorithms::Strategy::UsesDescriptorSets { pool: descriptor_pool.clone() }, false)).unwrap();
         let command_pool = CommandPool::new(device.clone(), CommandPoolCreateFlags::empty(), compute_queue.family_index()).unwrap();
         let cmd = unsafe { command_pool.allocate_command_buffers(CommandBufferLevel::PRIMARY, 1).unwrap().next().unwrap() };
         let allocators = StandardAllocator::new(device.clone()).unwrap();
         let host_freelist = allocators.freelist(BufferUsageFlags::STORAGE_BUFFER, MemoryPropertyFlags::HOST_VISIBLE_COHERENT).unwrap();
-        let payload_src = SlVec::from_iter((0..512).into_iter(), host_freelist.clone()).unwrap();
-        let payload_dst = SlVec::<i32, dyn GeneralAllocator>::new_zeroed(512, host_freelist.clone()).unwrap();
-        let indices = SlVec::from_iter((0..512).into_iter().rev(), host_freelist.clone()).unwrap();
-
+        let mem_out = SlVec::<i32, dyn GeneralAllocator>::new_zeroed(512, host_freelist.clone()).unwrap();
+        let set_in = SlBox::new(42i32, host_freelist.clone()).unwrap();
         cmd.begin(CommandBufferBeginInfo::default()).unwrap();
-        scatter.execute(&cmd, &ScatterMemoryInput {
-            index_count: indices.len() as u32,
-            indices: indices.as_nfptr_ty().unwrap(),
-            payload_src: unsafe { payload_src.as_nfptr() },
-            payload_dst: unsafe { payload_dst.as_nfptr() },
-            payload_size: 1,
+        set.execute(&cmd, &SetMemoryInput {
+            count: mem_out.len() as u32,
+            mem_out: mem_out.get_allocation(),
+            set_in: set_in.get_allocation(),
+            size: 1,
         });
         cmd.end().unwrap();
         let fence = Fence::new(device.clone(), false);
@@ -265,8 +259,8 @@ mod test {
                 .build()
         ], &fence).unwrap();
         fence.wait_max().unwrap();
-        for (host_i, i) in payload_dst.iter().zip((0..512).rev()) {
-            assert!(*host_i == i);
+        for host_i in mem_out.iter() {
+            assert!(*host_i == 42);
         }
     }
     #[derive(Debug)]
@@ -277,7 +271,7 @@ mod test {
         w: u32,
     }
     #[test]
-    fn scatter_sized_test() {
+    fn set_large_test() {
         let (device, mut queues) = barebones();
         let compute_queue = queues.next().unwrap();
         let descriptor_pool = DescriptorPoolBuilder::new()
@@ -287,29 +281,24 @@ mod test {
             .add_pool_size(DescriptorType::UNIFORM_BUFFER, 8)
             .add_pool_size(DescriptorType::COMBINED_IMAGE_SAMPLER, 8)
             .build(compute_queue.device());
-        let mut scatter = ScatterMemory::strategy(device.clone(), StarlitStrategy::new(crate::algorithms::Strategy::UsesDescriptorSets { pool: descriptor_pool.clone() }, false)).unwrap();
+        let mut set = SetMemory::strategy(device.clone(), StarlitStrategy::new(crate::algorithms::Strategy::UsesDescriptorSets { pool: descriptor_pool.clone() }, false)).unwrap();
         let command_pool = CommandPool::new(device.clone(), CommandPoolCreateFlags::empty(), compute_queue.family_index()).unwrap();
         let cmd = unsafe { command_pool.allocate_command_buffers(CommandBufferLevel::PRIMARY, 1).unwrap().next().unwrap() };
         let allocators = StandardAllocator::new(device.clone()).unwrap();
         let host_freelist = allocators.freelist(BufferUsageFlags::STORAGE_BUFFER, MemoryPropertyFlags::HOST_VISIBLE_COHERENT).unwrap();
-        let payload_src = SlVec::from_iter((0..512).into_iter().map(|i|{
-            LargeValue {
-                x: i,
-                y: i,
-                z: i,
-                w: i,
-            }
-        }), host_freelist.clone()).unwrap();
-        let payload_dst = SlVec::<LargeValue, dyn GeneralAllocator>::new_zeroed(512, host_freelist.clone()).unwrap();
-        let indices = SlVec::from_iter((0..512).into_iter().rev(), host_freelist.clone()).unwrap();
-
+        let mem_out = SlVec::<LargeValue, dyn GeneralAllocator>::new_zeroed(512, host_freelist.clone()).unwrap();
+        let set_in = SlBox::new(LargeValue {
+            x: 3,
+            y: 777,
+            z: 42,
+            w: 666,
+        }, host_freelist.clone()).unwrap();
         cmd.begin(CommandBufferBeginInfo::default()).unwrap();
-        scatter.execute(&cmd, &ScatterMemoryInput {
-            index_count: indices.len() as u32,
-            indices: indices.as_nfptr_ty().unwrap(),
-            payload_src: unsafe { payload_src.as_nfptr() },
-            payload_dst: unsafe { payload_dst.as_nfptr() },
-            payload_size: 4 as u32,
+        set.execute(&cmd, &SetMemoryInput {
+            count: mem_out.len() as u32,
+            mem_out: mem_out.get_allocation(),
+            set_in: set_in.get_allocation(),
+            size: 4,
         });
         cmd.end().unwrap();
         let fence = Fence::new(device.clone(), false);
@@ -319,11 +308,11 @@ mod test {
                 .build()
         ], &fence).unwrap();
         fence.wait_max().unwrap();
-        for (host_i, i) in payload_dst.iter().zip((0..512).rev()) {
-            assert!(host_i.x == i);
-            assert!(host_i.y == i);
-            assert!(host_i.z == i);
-            assert!(host_i.w == i);
+        for host_i in mem_out.iter() {
+            assert!(host_i.x == 3);
+            assert!(host_i.y == 777);
+            assert!(host_i.z == 42);
+            assert!(host_i.w == 666);
         }
     }
 }

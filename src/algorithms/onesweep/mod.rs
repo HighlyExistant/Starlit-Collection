@@ -13,7 +13,7 @@ pub mod histogram;
 pub mod scan;
 pub mod tuning;
 pub mod digit_binning_pass;
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct OneSweepU32Input {
     pub sort: NfPtr,
     pub num_keys: usize,
@@ -109,7 +109,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
             }
             prev_input.num_keys = input.num_keys;
             prev_input.thread_blocks = thread_blocks as usize;
-            prev_input.sort_buffer = input.sort;
+            prev_input.sort_buffer = input.sort.clone();
         } else { // if the cache has not been used it's the first time and all must be allocated
             let thread_blocks = input.num_keys.div_ceil(self.tuning.partition_size as usize) as u32; // OneSweepU32::<A>::PART_SIZE
             let global_histogram_partitions = input.num_keys.div_ceil(32768);
@@ -122,7 +122,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
                 global_shared_memory: SlVec::new(self.freelist.clone()),
                 num_keys: input.num_keys,
                 thread_blocks: thread_blocks as usize,
-                sort_buffer: input.sort,
+                sort_buffer: input.sort.clone(),
                 global_histogram_partitions,
                 debug: Some(debug),
             };
@@ -149,7 +149,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
             self.histogram.register(&Radix256HistogramInput {
                 num_keys: input.num_keys as u32,
                 thread_blocks: input.thread_blocks as u32,
-                u32_in: input.sort_buffer,
+                u32_in: input.sort_buffer.clone(),
                 histogram_out: input.histogram.get_allocation(),
             }).unwrap();
             self.histogram.input(command_buffer.get_command_buffer()).unwrap();
@@ -197,7 +197,7 @@ impl<A: GeneralAllocator> StarlitShaderAlgorithm<A> for OneSweepU32<A> {
                 radix_shift: 0,
                 thread_blocks: input.thread_blocks as u32,
                 num_keys: input.num_keys as u32,
-                sorting_buffer: input.sort_buffer,
+                sorting_buffer: input.sort_buffer.clone(),
                 histogram_pass_inout: input.histogram_pass.get_allocation(),
                 partition_tile_indices: input.global_partition_tiles.get_allocation(),
                 alternate_buffer: input.sort_alt_buffer.get_allocation(),

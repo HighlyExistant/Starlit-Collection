@@ -47,7 +47,7 @@ mod tests {
             host2vec.push(i);
         }
     }
-    // #[test]
+    #[test]
     fn buffer_addressing_vec_test() {
         let instance = InstanceBuilder::new()
         .set_version(Version::new(1, 2, 0))
