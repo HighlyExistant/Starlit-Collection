@@ -1,8 +1,3 @@
-glslc src\algorithms\morton\shaders\morton_ds.comp -o src\algorithms\morton\build\morton_ds.comp.spv
-glslc src\algorithms\morton\shaders\morton_da.comp -o src\algorithms\morton\build\morton_da.comp.spv
-glslc src\algorithms\morton\shaders\m32tom64_ds.comp -o src\algorithms\morton\build\m32tom64_ds.comp.spv
-glslc src\algorithms\morton\shaders\m32tom64_da.comp -o src\algorithms\morton\build\m32tom64_da.comp.spv
-
 glslc prefix_sum.comp -o src\algorithms\prefix_sum\shaders\prefix_sum.comp.spv
 
 glslc src\algorithms\onesweep\shaders\histogram_radix256.comp -o src\algorithms\onesweep\build\histogram_radix256.comp.spv

@@ -3,9 +3,6 @@ use std::sync::Arc;
 use ash::vk;
 use nightfall_core::{barriers::Barriers, buffers::{BufferCreateFlags, BufferCreateInfo, BufferOffset, BufferUsageFlags, MemoryPropertyFlags}, commands::CommandPoolAllocation, descriptors::{DescriptorLayout, DescriptorPool, DescriptorSetAllocation}, device::LogicalDevice, memory::DevicePointer, queue::Queue};
 use crate::{alloc::{FreeListAllocator, GeneralAllocator, StackAllocator}, error::StarlitError};
-
-/// standard morton code calculator module 
-pub mod morton;
 /// standard prefix sum module 
 pub mod prefix_sum;
 /// onesweep module that must support thread forwarding 

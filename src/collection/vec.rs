@@ -361,13 +361,6 @@ impl<T, A: GeneralAllocator + ?Sized> IndexMut<usize> for SlVec<T, A> {
         unsafe { self.buf.ptr().unwrap().add(index).as_mut().unwrap() }
     }
 }
-// impl<T, A: GeneralAllocator + ?Sized> Drop for SlVec<T, A> {
-//     fn drop(&mut self) {
-//         // if self.capacity() != 0 {
-//         //     self.buf.alloc.deallocate(self.buf.allocation.clone(), Layout::from_size_align(self.len*std::mem::size_of::<T>(), std::mem::align_of::<T>()).unwrap()).unwrap();
-//         // }
-//     }
-// }
 impl<T, A: GeneralAllocator + ?Sized> Drop for SlRawVec<T, A> {
     fn drop(&mut self) {
         let loaded = unsafe { SL_VEC_COUNTER.load(std::sync::atomic::Ordering::Relaxed) };

@@ -22,9 +22,7 @@ pub struct DeviceRangeInput {
     pub value: NfPtr,
 }
 pub struct DeviceRange {
-    device: Arc<LogicalDevice>,
-    range: ComputePipeline,
-    desc_layout: Arc<DescriptorLayout>,
+    pipeline: Arc<ComputePipeline>,
     layout: Arc<PipelineLayout>,
     state: StarlitStrategyState<DeviceRangeInput>,
 }
@@ -57,9 +55,9 @@ impl StarlitShaderKernel for DeviceRange {
                 return Err(StarlitError::Internal("Not Implemented".into()));
             }
         };
-        let pipeline = ComputePipeline::new(device.clone(), layout.clone(), shader.clone())?;
+        let pipeline = Arc::new(ComputePipeline::new(device.clone(), layout.clone(), shader.clone())?);
         
-        Ok(Self { device, range: pipeline, desc_layout, layout, state: StarlitStrategyState { strategy, input: None } })
+        Ok(Self { pipeline, layout, state: StarlitStrategyState { strategy, input: None } })
     }
     fn register(&mut self, input: &Self::Input) -> Result<(), StarlitError> {
         // let state = DeviceRangeState {
@@ -71,7 +69,7 @@ impl StarlitShaderKernel for DeviceRange {
             StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                 let writer = DescriptorWriter::new()
                     .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.value.as_descriptor_buffer_info());
-                writer.write(self.device.clone()); 
+                writer.write(self.pipeline.device().clone()); 
             }
             _ => {
                 return Err(StarlitError::Internal("Not Implemented".into()));
@@ -88,12 +86,12 @@ impl StarlitShaderKernel for DeviceRange {
                     start: input.start,
                     size: input.end,
                 };
-                self.device.push_constants(command_buffer, self.layout.get_layout(), ShaderStageFlags::COMPUTE, 0, &dspc);
+                self.pipeline.device().push_constants(command_buffer, self.layout.get_layout(), ShaderStageFlags::COMPUTE, 0, &dspc);
                 unsafe { 
-                    self.range.device().device().cmd_bind_descriptor_sets(
+                    self.pipeline.device().device().cmd_bind_descriptor_sets(
                         command_buffer, 
                         vk::PipelineBindPoint::COMPUTE, 
-                        self.range.layout().get_layout(), 
+                        self.pipeline.layout().get_layout(), 
                         0, 
                         &[sets[0].set()], 
                         &[]
@@ -107,13 +105,13 @@ impl StarlitShaderKernel for DeviceRange {
         Ok(())
     }
     fn bind(&self, command_buffer: vk::CommandBuffer) {
-        self.range.bind(command_buffer);
+        self.pipeline.bind(command_buffer);
     }
     fn dispatch(&self, command_buffer: vk::CommandBuffer, dispatch_x: u32, dispatch_y: u32, dispatch_z: u32) {
-        self.range.dispatch(command_buffer, dispatch_x, 1, 1);
+        self.pipeline.dispatch(command_buffer, dispatch_x, 1, 1);
     }
     fn dispatch_indirect(&self, command_buffer: vk::CommandBuffer, indirect: nightfall_core::buffers::BufferOffset) {
-        self.range.dispatch_indirect(command_buffer, indirect);
+        self.pipeline.dispatch_indirect(command_buffer, indirect);
     }
     fn dispatch_with_barrier(&self, command_buffer: vk::CommandBuffer, dispatch_x: u32, dispatch_y: u32, dispatch_z: u32) -> Option<nightfall_core::barriers::Barriers> {
         self.dispatch(command_buffer, dispatch_x, dispatch_y, dispatch_z);
@@ -139,26 +137,26 @@ impl StarlitShaderExecute for DeviceRange {
             StarlitStrategyInternal::UsesDescriptorSets { sets } => {
                 let writer = DescriptorWriter::new()
                     .add_storage_buffer(sets[0].set(), 1, 0, 0, &input.value.as_descriptor_buffer_info());
-                writer.write(self.device.clone());
+                writer.write(self.pipeline.device().clone());
                 let dspc = DeviceRangeInputDSPC {
                     start: input.start,
                     size: input.end,
                 };
                 self.state.input = Some(input.clone());
-                self.device.push_constants(command_buffer.get_command_buffer(), self.layout.get_layout(), ShaderStageFlags::COMPUTE, 0, &dspc);
+                self.pipeline.device().push_constants(command_buffer.get_command_buffer(), self.layout.get_layout(), ShaderStageFlags::COMPUTE, 0, &dspc);
                 unsafe { 
-                    self.range.device().device().cmd_bind_descriptor_sets(
+                    self.pipeline.device().device().cmd_bind_descriptor_sets(
                         command_buffer.get_command_buffer(), 
                         vk::PipelineBindPoint::COMPUTE, 
-                        self.range.layout().get_layout(), 
+                        self.pipeline.layout().get_layout(), 
                         0, 
                         &[sets[0].set()], 
                         &[]
                     ) 
                 }
-                self.range.bind(command_buffer.get_command_buffer());
+                self.pipeline.bind(command_buffer.get_command_buffer());
                 let dispatch_x = (input.end-input.start).div_ceil(1024);
-                self.range.dispatch(command_buffer.get_command_buffer(), dispatch_x, 1, 1);
+                self.pipeline.dispatch(command_buffer.get_command_buffer(), dispatch_x, 1, 1);
             }
             _ => {
                 return Err(StarlitError::Internal("Not Implemented".into()));
